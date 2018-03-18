@@ -2,6 +2,9 @@
 
 -load temba compress smartmin i18n
 
+-block page-title
+  {{user_org.name|capfirst}}
+  
 -block title
   .medium-help.icon-home{ style:'float:left;' }
   %h2.header-margin
@@ -148,4 +151,8 @@
     li#id-webhook.has-webhook .formax-summary {
       padding-top: 0px;
       margin-top: -2px;
+    }
+
+    .formax-vertical ul.errorlist {
+      margin-left: 0px !important;
     }

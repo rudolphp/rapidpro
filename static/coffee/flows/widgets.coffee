@@ -1,40 +1,147 @@
 app = angular.module('temba.widgets', [])
 
 #============================================================================
+# Displaying USSD Menu with textarea, menu inputs and char counter
+#============================================================================
+app.directive "ussd", [ "$rootScope", "$log", "Flow", ($rootScope, $log, Flow) ->
+  MESSAGE_LENGTH = 182
+
+  link = (scope, element, attrs) ->
+    scope.USSD_MENU = parseInt(attrs.ussd) == 0
+    scope.USSD_RESPONSE = parseInt(attrs.ussd) == 1
+
+    scope.ruleset.ruleset_type = if scope.USSD_MENU then "wait_menu" else "wait_ussd"
+
+    scope.ruleset.config ?= {}
+    scope.ruleset.config.ussd_message ?= {}
+    scope.ruleset.config.ussd_message[Flow.flow.base_language] ?= ""
+
+    isVisible = (rule) ->
+      return Flow.flow.flow_type in rule._config.filter
+
+    menu = null
+    do refreshMenu = ->
+      menu = scope.ruleset.rules.filter (rule) -> isVisible(rule)
+
+    updateCategory = (item) ->
+      if not item.category._autoName
+        return
+
+      words = item.label[Flow.flow.base_language].trim().split(/\b/)
+      if words
+        categoryName = words[0].toUpperCase()
+        item.category._base = categoryName
+        if categoryName.length > 1
+          item.category._base = categoryName.charAt(0) + categoryName.substr(1).toLowerCase()
+
+    do insertEmpty = ->
+      refreshMenu()
+      if scope.USSD_MENU
+        # when we switch back from "wait_ussd", filter out arbitrary rules
+        if (scope.ruleset.rules.filter (rule) -> not rule.label and isVisible(rule))
+          scope.ruleset.rules = scope.ruleset.rules.filter (rule) -> rule.label or (not rule.label and not isVisible(rule))
+          refreshMenu()
+
+        if menu.length == 0 or menu[menu.length - 1].category?._base != ""
+          scope.ruleset.rules.splice menu.length, 0,
+            _config: Flow.getOperatorConfig("eq")
+            uuid: uuid()
+            label: {}
+            test:
+              type: 'eq'
+              _base: if menu.length >= 9 then 0 else menu.length + 1
+            category:
+              _autoName: true
+              _base: ""
+      else
+        if menu[menu.length - 1]?.category?._base == ""
+          scope.ruleset.rules.splice(menu.length - 1, 1)
+
+    scope.remove = (item, index) ->
+      refreshMenu()
+      scope.ruleset.rules.splice(index, 1)
+      if index == 0 or index == menu.length - 1
+        insertEmpty()
+
+    scope.updateMenu = (item, index) ->
+      refreshMenu()
+      scope.countCharacters()
+      updateCategory(item)
+      if item.label[Flow.flow.base_language].length == 1 and index == menu.length - 1
+        insertEmpty()
+
+    do scope.countCharacters = ->
+      sumMenuItems = (items) ->
+        items
+          .filter (rule) -> isVisible(rule)
+          .reduce (prev, current) ->
+            current.label[Flow.flow.base_language] ?= ""
+            prev + current.test._base.toString().length + current.label[Flow.flow.base_language].length + 2 # 1 for space 1 for newline char
+          ,0
+
+      textLength = scope.ruleset.config.ussd_message[Flow.flow.base_language].length
+      textMenuLength = (textLength + 1 + sumMenuItems(scope.ruleset.rules)) if scope.USSD_MENU
+      $rootScope.characters = if scope.USSD_MENU then MESSAGE_LENGTH - textMenuLength else MESSAGE_LENGTH - textLength
+
+  return {
+    templateUrl: "/partials/ussd_directive"
+    restrict: "A"
+    link: link
+    scope: true
+  }
+]
+
+#============================================================================
 # Simple directive for displaying a localized textarea with a char counter
 #============================================================================
-app.directive "sms", [ "$log", "Flow", ($log, Flow) ->
+app.directive "msg", [ "$log", "Flow", ($log, Flow) ->
+
   link = (scope, element, attrs) ->
+
+    msgType = if attrs.type then attrs.type else "sms"
+
+    if msgType == "sms"
+      messageLength = 160
+    else if msgType == "ussd"
+      messageLength = 182
 
     scope.showCounter = true
     if attrs.showCounter?
       scope.showCounter = eval(attrs.showCounter)
 
-    # find out how many sms messages this will be
+    # find out how many messages this will be
     scope.countCharacters = ->
       if scope.message
-        length = scope.message.length
-        scope.messages = Math.ceil(length/160)
-        scope.characters = scope.messages * 160 - length
+        if msgType == "sms"
+          length = scope.message.length
+          scope.messages = Math.ceil(length/messageLength)
+          scope.characters = scope.messages * messageLength - length
+        if msgType == "ussd"
+          length = scope.message.length
+          scope.characters = messageLength - length
+
+          # invalidate form if we ran out of chars
+          modelController = element.find('textarea').controller('ngModel')
+          modelController?.$setValidity 'message', scope.characters >= 0
       else
         scope.messages = 0
-        scope.characters = 160
+        scope.characters = messageLength
 
     # update our counter everytime the message changes
     scope.$watch (->scope.message), scope.countCharacters
 
     # determine the initial message based on the current language
-    if scope.sms
-      scope.message = scope.sms[Flow.flow.base_language]
+    if scope.msg
+      scope.message = scope.msg[Flow.flow.base_language]
       if not scope.message
         scope.message = ""
 
   return {
-    templateUrl: "/partials/sms_directive"
+    templateUrl: "/partials/msg_directive"
     restrict: "A"
     link: link
     scope: {
-      sms: '='
+      msg: '='
       message: '='
     }
   }
@@ -133,7 +240,6 @@ app.directive "select2", ["$timeout", ($timeout) ->
   }
 ]
 
-
 app.directive "selectLabel", ["$timeout", "Flow", ($timeout, Flow) ->
   link = (scope, element, attrs, form) ->
 
@@ -147,7 +253,9 @@ app.directive "selectLabel", ["$timeout", "Flow", ($timeout, Flow) ->
     if scope.ngModel
       initLabels = []
       for label in scope.ngModel
-        initLabels.push(label)
+        initLabels.push
+          id: label.uuid
+          text: label.name
 
       select2.data(initLabels)
 
@@ -239,6 +347,7 @@ app.directive "selectEmail", ["$timeout", ($timeout) ->
   }
 ]
 
+
 #============================================================================
 # Create a select2 control for predefined data
 #============================================================================
@@ -252,14 +361,22 @@ app.directive "selectStatic", ['$timeout', ($timeout) ->
       minimumInputLength: 0
       query: (query) ->
         data = { results: [] }
+        cleaned_query = if query.term then query.term.toLowerCase().strip() else ""
+        exact_match = false
+
         for d in this['data']
           if d.text
-            if not query.term or  d.text.toLowerCase().indexOf(query.term.toLowerCase().strip()) != -1
+            if not query.term or d.text.toLowerCase().indexOf(cleaned_query) != -1
               data.results.push({ id:d.id, text: d.text });
 
+              if d.text.toLowerCase() == cleaned_query
+                exact_match = true
+
         # TODO: This should be configurable via the directive, for now only variable selection using this
-        if query.term and data.results.length == 0 and query.term.strip().length > 0 and /^[a-zA-Z0-9-][a-zA-Z0-9- ]*$/.test(query.term.strip())
+        # if term is non-empty and hasn't matched an returned item exactly, show option for creating a new item
+        if not exact_match and cleaned_query.length > 0 and cleaned_query.length <= 36 and /^[a-z0-9-][a-z0-9- ]*$/.test(cleaned_query)
           data.results.push({id:'[_NEW_]' + query.term, text: gettext('Add new variable') + ': ' + query.term});
+
         query.callback(data)
 
       formatNoMatches: (term) ->
@@ -429,6 +546,15 @@ app.directive "omnibox", [ "$timeout", "$log", "Flow", ($timeout, $log, Flow) ->
       formatSelection: omniFormatOmniboxSelection
       formatResult: omniFormatOmniboxOption
 
+    # make our options sortable
+    if options.sortable
+      $(ele).select2("container").find("ul.select2-choices").sortable
+        containment:'parent',
+        start: -> $(ele).select2("onSortStart")
+        stop: -> $(ele).select2("onSortEnd")
+
+    return ele
+
   parseData = (data) ->
     groups = []
     contacts = []
@@ -436,9 +562,9 @@ app.directive "omnibox", [ "$timeout", "$log", "Flow", ($timeout, $log, Flow) ->
 
     for item in data
       if item.id[0] == 'g'
-        groups.push({id:parseInt(item.id.slice(2)), name:item.text})
+        groups.push({id:item.id.slice(2), name:item.text})
       else if item.id[0] == 'c'
-        contacts.push({id:parseInt(item.id.slice(2)), name:item.text})
+        contacts.push({id:item.id.slice(2), name:item.text})
       else if item.id[0] == '@'
         variables.push({id:item.id, name:item.id})
       else
@@ -468,14 +594,14 @@ app.directive "omnibox", [ "$timeout", "$log", "Flow", ($timeout, $log, Flow) ->
     if scope.groups
       for group in scope.groups
         if group.name
-          data.push({ id:'g-' + group.id, text:group.name})
+          data.push({ id:'g-' + group.uuid, text:group.name})
         else
           data.push({ id:group, text:group })
 
     if scope.contacts
       for contact in scope.contacts
         if contact.name
-          data.push({ id:'c-' + contact.id, text:contact.name})
+          data.push({ id:'c-' + contact.uuid, text:contact.name})
         else
           data.push({ id:contact, text:contact })
 

@@ -17,6 +17,8 @@
         %textarea#id_text{tabindex:1}
         #counter
 
+        #recipients-count
+
         #omni
           #omni-select2
             #omnibox.placeholder.populate{style:"width:100%"}
@@ -30,7 +32,12 @@
         directly.
 
   .modal-footer
-    -if send_channel
+    -if object.flow_type == 'U' and not is_ussd_channel
+      %a.btn.cancel{tabindex:4}
+        -trans "Cancel"
+      %a.btn.btn-primary{href:"{% url 'channels.channel_list' %}", tabindex:3}
+        -trans "Add USSD Channel"
+    -elif send_channel
       %a.btn.schedule.pull-left
         -trans "Schedule"
       %a.btn.cancel{tabindex:4}
@@ -43,15 +50,7 @@
       %a.btn.btn-primary{href:"{% url 'channels.channel_list' %}", tabindex:3}
         -trans "Add Channel"
 
-  %script{src:"{{ STATIC_URL }}scripts/at/xregexp-min.js"}
-  %script{src:"{{ STATIC_URL }}scripts/At.js/bower_components/Caret.js/dist/jquery.caret.js"}
-  %script{src:"{{ STATIC_URL }}scripts/At.js/dist/js/jquery.atwho.js"}
-  %script{src:"{{ STATIC_URL }}js/excellent.js"}
-
-
   -load compress
-
-  %link{href:'{{ STATIC_URL }}scripts/At.js/dist/css/jquery.atwho.css', rel:'stylesheet', type:'text/css'}
 
   :javascript
     $(document).ready(function() {
@@ -69,16 +68,15 @@
     };
 
     // show the compose dialog with some contacts prepopulated
-    function showComposeInitialized(queryString, url) {
-      showCompose(true, url);
+    function showComposeInitialized(queryString, url, onComplete) {
+      showCompose(true, url, null, null, onComplete);
       $.get("{% url 'contacts.contact_omnibox' %}?" + queryString, function(data, textStatus){
         initializeOmnibox(data.results);
         $('.select2-input').attr('tabindex', 2);
       });
     }
 
-    
-    function showCompose(loading, url) {
+    function showCompose(loading, url, nodeUUID, nodeRecipientsCount, onComplete) {
       // make sure any previous errors are removed
       $("#send-message .error").remove();
 
@@ -94,6 +92,17 @@
       } else {
         $("#omni-select2").show();
         $("#loading").hide();
+      }
+
+      $("#recipients-count").hide();
+
+      if(nodeUUID) {
+        $("#omnibox").hide();
+        $("#omni-select2").hide();
+        $("#loading").hide();
+        $("#send-message .schedule").hide();
+        $("#recipients-count").html("<strong>" + formatNumber(nodeRecipientsCount) + "</strong> " + '{% trans "recipients at this point in the flow" %}' );
+        $("#recipients-count").show();
       }
 
       // show the modal
@@ -113,19 +122,14 @@
         }
       });
 
-      // close the compose when clicked escape
-      $(document).keyup(function(e) {
-        if(e.keyCode === 27) {
-          hideCompose();
-        }
-      });
-
       // store our post location in the form
       $('#send-form').attr("action", url);
 
-      $("#send-message .ok").unbind('click').unbind('keypress').click(function(e) {sendMessage(e) }).keypress(function(e) {
+      $("#send-message .ok").unbind('click').unbind('keypress').click(function(e) {
+        sendMessage(e, null, nodeUUID, onComplete)
+      }).keypress(function(e) {
         if(e.which == 13){
-          sendMessage(e);
+          sendMessage(e, null, nodeUUID, onComplete);
         }
       });
 
@@ -145,7 +149,7 @@
       sendMessage(this, true);
     });
 
-    function sendMessage(e, scheduled) {
+    function sendMessage(e, scheduled, nodeUUID, onComplete) {
       if ($("#send-message .ok").hasClass("disabled")) {
         e.preventDefault();
         return;
@@ -169,6 +173,7 @@
 
       // our post data
       var data = {
+        step_node: nodeUUID,
         schedule: scheduled,
         text: form.find("#id_text").val(),
         csrfmiddlewaretoken: form.find("[name='csrfmiddlewaretoken']").val()
@@ -189,6 +194,10 @@
           hideCompose();
         }
         fetchPJAXContent(".", "#pjax", { forceReload:true });
+
+        if (onComplete) {
+          onComplete();
+        }
 
 
       }).fail(function(data, textStatus) {

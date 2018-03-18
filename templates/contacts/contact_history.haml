@@ -1,82 +1,115 @@
--extends "contacts/contact_read.html"
+-load contacts humanize smartmin temba i18n sms
 
--block contact-groups
+-for item in activity
+  %tr{class:"{{item|history_class}}"}
+    %td.icon
+      %span.det{title:'{% if item.obj.channel %}{{item.obj.channel.get_channel_type_name}} {{item.obj.channel.get_name}}{% endif %}'}
+        {{item|activity_icon}}
 
--block read-buttons
+    %td.details.wrapped
+      -if item.type == 'msg'
+        -with item.obj as msg
+          .activity-message
+            -if msg.direction == 'O' and msg.broadcast.recipient_count > 1
+              .sent-to
+                .summary
+                  Broadcast to {{msg.broadcast.recipient_count|intcomma}} recipients
 
--block content
-  .row
-    .span12
-      -for event in events
-        -with event.1 as e
-          .history-event
-            .event-header
-              .event-type
-                -if e.direction == 'I'
-                  incoming msg
-                -elif e.direction == 'O'
-                  outgoing msg
-                -elif e.fired
-                  campaign event
-                -elif e.step_type == 'R'
-                  flow ruleset
-                -elif e.step_type == 'A'
-                  flow action
-              .event-time
-                {{ event.0|date:"N j, Y G:i:s.u" }}
-                &nbsp;
+            .activity-body
+              -if item.obj.text
+                .text{ style:"{% if msg.attachments %}margin-bottom:10px{% endif %}" }
+                  {{item.obj.text}}
 
-            .event-details
-              -if e.direction == 'I'
-                .event-msg-in
-                  {{ e.text }}
-              -elif e.direction == 'O'
-                .event-msg-out
-                  {{ e.text }}
-              -elif e.fired
-                .event-campaign
-                  Scheduled start of <a href="{% url 'flows.flow_editor' e.event.flow.pk %}">{{ e.event.flow }}</a> from campaign <a href="{% url 'campaigns.campaignevent_read' e.event.pk %}">{{ e.event.campaign.name }}</a>
-              -elif e.step_type
-                .event-flow
-                  -if e.step_type == 'R'
-                    Handled by ruleset in <a href="{% url 'flows.flow_editor' e.run.flow.pk %}">{{ e.run.flow }}</a> categorized as <b>{{ e.rule_category }}</b> with value <b>"{{ e.rule_value }}"</b>
-                  -else
-                    Actions performed in <a href="{% url 'flows.flow_editor' e.run.flow.pk %}">{{ e.run.flow }}</a>
-                  <p>{{ e.get_step.get_description|linebreaks }}</p>
+              -for attachment in msg.attachments
+                {% attachment_button attachment %}
+
+      -if item.type == 'broadcast'
+        -with item.obj as broadcast
+          .activity-broadcast
+            -if broadcast.recipient_count > 1
+              .sent-to
+                .summary
+                  Broadcast to {{broadcast.recipient_count|intcomma}} recipients
+
+            .activity-body
+              -if broadcast.translated_text
+                .text{ style:"{% if broadcast.attachments %}margin-bottom:10px{% endif %}" }
+                  {{broadcast.translated_text}}
+
+              -for attachment in broadcast.attachments
+                {% attachment_button attachment %}
+
+      -elif item.type == 'channel-event'
+        -with item.obj as event
+          -if event.event_type == 'mt_miss'
+            -trans "Missed call"
+          -elif event.event_type == 'new_conversation'
+            -trans "Started Conversation"
+          -elif event.event_type == 'referral'
+            -trans "Referred"
+          -elif event.event_type == 'follow'
+            -trans "Followed"
+          -else
+            -trans "Phone call"
+            ({{event.extra.duration|format_seconds}})
+
+      -elif item.type == 'call'
+        -with item.obj as call
+          -if call.status == 'D'
+            -trans "Call Started"
+          -else
+            {{call.get_status_display}}
+
+      -elif item.type == 'run-start' or item.type == 'run-exit'
+        -with item.obj as run
+          .activity-run
+            .activity-body
+              .summary
+              -if item.type == 'run-exit'
+                {{ run.get_exit_type_display }}
               -else
-                {{ e }}
+                Started
+              %a{href:'{% url "flows.flow_editor" run.flow.uuid %}'}
+                {{run.flow.name}}
 
+      -elif item.type == 'event-fire'
+        -with item.obj as eventfire
+          %a{href:'{%url "campaigns.campaign_read" eventfire.event.campaign.pk %}'}><
+            {{eventfire.event.campaign.name}}
 
--block extra-style
-  {{ block.super }}
-  :css
-    .history-event {
-      margin-bottom: 5px;
-      border-bottom: 1px solid #ccc;
-      padding-bottom: 5px;
-    }
+          &nbsp;triggered
 
-    .event-type {
-      float: right;
-      font-style: italic;
-      color: #888;
-    }
+          %a{href:'{%url "campaigns.campaignevent_read" eventfire.event.pk %}'}
+            {{eventfire.event|event_time}}
 
-    .event-time {
-      font-weight: 600;
-    }
+      -elif item.type == 'webhook-result'
+        -with item.obj as result
+          -if result.is_success
+            -trans "Successfully called"
+          -else
+            -trans "Failed to call"
+          {{result.url|truncatechars:100}}
 
-    .event-msg-in {
-      font-style: italic;
-      text-align: left;
+    %td.created_on
+      %span.time
+        %span.short
+          {{item.time|gmail_time}}
+        %span.long.hide
+          {{item.time}}
 
-    }
+      .log-icon
+        -if not user_org.is_anon or perms.contacts.contact_break_anon
+          -if item.type == 'msg' or item.type == 'call'
+            {% channel_log_link item.obj %}
 
-    .event-msg-out {
-    font-style: italic;
-      text-align: left;
-    }
+          -if item.type == 'webhook-result'
+            -with item.obj.event as event
+              %a{href:"{%url 'api.log_read' event.id %}"}
+                .icon-docs-2
 
-    .event-campaign, .event-flow {
-      padding-left: 300px;
-    }
+-if has_older and not recent_only
+  %tr{ ic-append-from:"/contact/history/{{contact.uuid}}/?after={{after}}&before={{before}}", 
+       ic-trigger-on:"scrolled-into-view", 
+       ic-target:"table.activity tbody.previous", 
+       ic-indicator:"#indicator" }
+

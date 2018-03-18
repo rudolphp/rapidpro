@@ -8,6 +8,7 @@
 # temba
 dump.rdb
 .coverage
+coverage_html_report
 env
 build
 config/gen
@@ -28,6 +29,7 @@ static/javascripts/
 temba/settings.py
 temba/smartmin
 temba.db
+smartmin
 
 
 # Exclude media folder except files used for import testing
@@ -39,6 +41,7 @@ media/orgs
 media/recordings
 media/test_orgs
 media/tmp
+media/attachments
 
 
 # External projects
@@ -78,8 +81,6 @@ var/
 *.manifest
 *.spec
 
-tags
-
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
@@ -89,6 +90,7 @@ htmlcov/
 .tox/
 .coverage
 .cache
+.perf_results
 nosetests.xml
 coverage.xml
 js-coverage/
@@ -106,3 +108,14 @@ docs/_build/
 # PyBuilder
 target/
 textit
+
+# Vagrant/Ansible
+.vagrant/
+ansible/vendor/
+ansible/site.retry
+
+# sublime projects
+*.sublime*
+
+# VS Code projects
+.vscode/

@@ -1,11 +1,11 @@
-from __future__ import unicode_literals
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 from django import template
-from temba.channels.views import get_channel_icon
 
 register = template.Library()
 
 
 @register.filter
 def channel_icon(channel):
-    return get_channel_icon(channel.channel_type)
+    return channel.get_type().icon

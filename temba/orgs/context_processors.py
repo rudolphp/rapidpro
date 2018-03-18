@@ -1,17 +1,14 @@
-from django.core.urlresolvers import reverse
-from .models import get_stripe_credentials, UNREAD_INBOX_MSGS, UNREAD_FLOW_MSGS
-from django.utils import timezone
-from django.conf import settings
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
+from collections import defaultdict
+from .models import get_stripe_credentials
 
-class defaultdict(dict):
-  def __missing__(self, key):
-    return False
 
 class GroupPermWrapper(object):
     def __init__(self, group):
         self.group = group
-        self.empty = defaultdict()
+        self.empty = defaultdict(lambda: False)
 
         self.apps = dict()
         if self.group:
@@ -20,7 +17,7 @@ class GroupPermWrapper(object):
                 app_perms = self.apps.get(app_name, None)
 
                 if not app_perms:
-                    app_perms = defaultdict()
+                    app_perms = defaultdict(lambda: False)
                     self.apps[app_name] = app_perms
 
                 app_perms[perm.codename] = True
@@ -28,7 +25,7 @@ class GroupPermWrapper(object):
     def __getitem__(self, module_name):
         return self.apps.get(module_name, self.empty)
 
-    def __iter__(self):
+    def __iter__(self):  # pragma: needs cover
         # I am large, I contain multitudes.
         raise TypeError("GroupPermWrapper is not iterable.")
 
@@ -36,15 +33,16 @@ class GroupPermWrapper(object):
         """
         Lookup by "someapp" or "someapp.someperm" in perms.
         """
-        if '.' not in perm_name:
+        if '.' not in perm_name:  # pragma: needs cover
             return perm_name in self.apps
 
-        else:
+        else:  # pragma: needs cover
             module_name, perm_name = perm_name.split('.', 1)
             if module_name in self.apps:
                 return perm_name in self.apps[module_name]
             else:
                 return False
+
 
 def user_group_perms_processor(request):
     """
@@ -70,48 +68,9 @@ def user_group_perms_processor(request):
 
     return context
 
+
 def settings_includer(request):
     """
     Includes a few settings that we always want in our context
     """
-    context = dict(STRIPE_PUBLIC_KEY=get_stripe_credentials()[0])
-    return context
-
-def unread_count_processor(request):
-    """
-    Context processor to calculate the number of unread messages in the inbox and on flow tabs
-    """
-    context = dict()
-    user = request.user
-
-    if user.is_superuser or user.is_anonymous():
-        return context
-
-    org = user.get_org()
-
-    if org:
-        # calculate and populate our unread counts on flows
-        flows_unread_count = org.get_unread_msg_count(UNREAD_FLOW_MSGS)
-
-        if request.path.find(reverse('flows.flow_list')) == 0:
-            org.clear_unread_msg_count(UNREAD_FLOW_MSGS)
-            org.flows_last_viewed = timezone.now()
-            org.save(update_fields=['flows_last_viewed'])
-            flows_unread_count = 0
-
-        context['flows_last_viewed'] = org.flows_last_viewed
-        context['flows_unread_count'] = flows_unread_count
-
-        # calculate and populate our unread counts on inbox msgs
-        msgs_unread_count = org.get_unread_msg_count(UNREAD_INBOX_MSGS)
-
-        if request.path.find(reverse('msgs.msg_inbox')) == 0:
-            org.clear_unread_msg_count(UNREAD_INBOX_MSGS)
-            org.msg_last_viewed = timezone.now()
-            org.save(update_fields=['msg_last_viewed'])
-            msgs_unread_count = 0
-
-        context['msgs_last_viewed'] = org.msg_last_viewed
-        context['msgs_unread_count'] = msgs_unread_count
-
-    return context
+    return dict(STRIPE_PUBLIC_KEY=get_stripe_credentials()[0])

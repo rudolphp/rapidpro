@@ -1,4 +1,7 @@
-from djcelery_transactions import task
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+from celery.task import task
 from .models import IVRCall
 
 

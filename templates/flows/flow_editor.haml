@@ -5,6 +5,8 @@
 -block html-tag
   <html lang="en" ng-app="app">
 
+-block page-title
+  {{object.name}}
 
 -block extra-less
   -compress css
@@ -30,25 +32,39 @@
 
 -block extra-script
   {{ block.super }}
-  %script{type:'text/javascript', src:'{{ STATIC_URL }}js/dom.jsPlumb-1.7.5.js'}
-  %script{type:'text/javascript', src:'{{ STATIC_URL }}angular/sortable.js'}
-  %script{type:'text/javascript', src:'{{ STATIC_URL }}angular/ui-bootstrap-tpls-0.11.0.js'}
-  %script{src:"{{ STATIC_URL }}scripts/At.js/bower_components/Caret.js/dist/jquery.caret.js"}
-  %script{src:"{{ STATIC_URL }}scripts/At.js/dist/js/jquery.atwho.js"}
-  %script{src:"{{ STATIC_URL }}js/excellent.js"}
-  %script{type:'text/javascript', src:'{{ STATIC_URL }}scripts/autosize/jquery.autosize-min.js'}
-  %script{type:'text/javascript', src:'{{ STATIC_URL }}scripts/angular-elastic-2.4.0/angular-elastic.js'}
 
+  -if org_perms.flows.flow_delete
+    :javascript
+      $(".delete-flow").live('click', function() {    
+        var modal = new Modax('{% trans "Delete Flow" %}', '{% url "flows.flow_delete" flow.id %}');
+        modal.addClass("alert");
+        modal.setRedirectOnSuccess(true);
+        modal.show();
+      });
+
+  -compress js
+    %script{type:'text/javascript', src:'{{ STATIC_URL }}bower/jsPlumb/dist/js/dom.jsPlumb-1.7.5.js'}
+    %script{type:'text/javascript', src:"{{ STATIC_URL }}bower/jquery-autosize/jquery.autosize.js"}
+    %script{type:'text/javascript', src:"{{ STATIC_URL }}bower/angular-elastic/elastic.js"}
+    %script{type:'text/javascript', src:"{{ STATIC_URL }}bower/angular-ui-sortable/sortable.js"}
+    %script{type:'text/javascript', src:"{{ STATIC_URL }}js/temba-ui-bootstrap-tpls.js"}
 
   :javascript
-    window.flowId = {{ object.pk }};
+    window.orgId = {{object.org.id}};
+    window.flowId = {{object.id}};
     window.simulateURL = '{% url "flows.flow_simulate" object.pk %}';
     window.activityURL = '{% url "flows.flow_activity" object.pk %}';
     window.uploadURL = '{% url "flows.flow_upload_action_recording" object.pk %}';
+    window.uploadMediaURL = '{% url "flows.flow_upload_media_action" object.pk %}';
     window.mutable = {{mutable|lower}};
     window.ivr = '{{object.flow_type}}' == 'V';
+    window.ussd = '{{object.flow_type}}' == 'U';
+    window.has_ussd_channel = {{has_ussd_channel|lower}};
     window.flow_type = '{{object.flow_type}}';
-    window.recordingURL = '{{recording_url}}';
+    window.mediaURL = '{{media_url}}';
+    window.hasAirtimeService = {{has_airtime_service|lower}};
+    window.connectAirtimeServiceURL = '{% url "orgs.org_home" %}#id-transferto';
+    window.contactName = '{{user.get_full_name}}';
 
     $('.draggable').draggable();
     // TODO: All inline javascript below should be replaced with corresponding angular implementations
@@ -74,15 +90,16 @@
         var modal = new Modax(gettext('Start Flow'), '{% url "flows.flow_broadcast" object.pk %}');
         var onActions = {
           onSuccess: function(data) {
-            $('html').scope().pending = 'P';
+            $('html').scope().is_starting = true;
           },
           onFormLoaded: function() { }
         }
         // check if there is no channel, change the primary button behavior to redirect to channel creation
-        if('{{has_outgoing_channel}}' == 'None') {
+        {% if not can_start or not has_outgoing_channel %}
           modal.setPrimaryButton(gettext("Add Channel"));
           onActions['onPrimary'] = function() { document.location.href = '{% url "channels.channel_list" %}' };
-        }
+        {% endif %}
+
         modal.setListeners(onActions);
         modal.show();
       });
@@ -103,20 +120,14 @@
       });
     });
 
-    function broadcastToNode(nodeUUID) {
-      var queryString = "s=" + nodeUUID;
-
-      if (window.simulation) {
-        queryString += "&simulation=true";
-      }
-
-      showComposeInitialized(queryString);
+    function broadcastToNode(nodeUUID, nodeRecipientCount) {
+      showCompose(false, null, nodeUUID, nodeRecipientCount);
       return false;
     }
 
     $(document).ready(function() {
-      {% if starting %}
-        $("html").scope().pending = 'P';
+      {% if is_starting %}
+        $("html").scope().is_starting = true;
       {% endif %}
     })
 
@@ -129,6 +140,8 @@
     %script{src:"{{ STATIC_URL }}coffee/flows/controllers.coffee", type:'text/coffeescript'}
     %script{src:"{{ STATIC_URL }}coffee/flows/directives.coffee", type:'text/coffeescript'}
     %script{src:"{{ STATIC_URL }}coffee/simulator.coffee", type:'text/coffeescript'}
+    %script{src:"{{ STATIC_URL }}coffee/simulator_py.coffee", type:'text/coffeescript'}
+    %script{src:"{{ STATIC_URL }}coffee/simulator_go.coffee", type:'text/coffeescript'}
 
 
   :javascript
@@ -206,10 +219,10 @@
         -if flow.flow_type == 'V'
           .icon-phone
         -elif flow.flow_type == 'S'
-          .icon-channel-android
+          .icon-mobile
         {{ flow.name }}
 
-      #pending{ng-show:'pending == "S" || pending == "P"'}
+      #pending{ng-show:'is_starting'}
         %div{class:"alert alert-info"}
           -blocktrans
             This flow is in the process of being sent, this message will disappear once all contacts have been added to the flow.
@@ -223,6 +236,8 @@
         .translated
           %span.pct{ng-show:'flow.base_language != language.iso_code'}
             [[flow._pctTranslated]]% translated
+
+    #simulator
 
     #status.hide
       #error
@@ -247,14 +262,24 @@
                 It's a good idea to start your call off by saying something first. You'll probably want to
                 introduce yourself and ask them a question. Just type the message for now, you'll be able to
                 add a voice recording of your message later.
+            -elif flow.flow_type == 'U'
+              -blocktrans
+                Welcome to a USSD flow. USSD is a session based communication type. We recommend starting your flow
+                by sending a USSD message. This message will be sent to anybody right after they join the flow.
+                This is your chance to send a single message or menu.
             -else
               -blocktrans
                 We recommend starting your flow by sending a message. This message will be sent to anybody right
                 after they join the flow. This is your chance to send a single message or ask them a question.
 
             .button
-              %a.btn.btn-primary{ng-click:'createFirstAction()'}
-                Create Message
+              -if flow.flow_type == 'U'
+                %a.btn.btn-primary{ng-click:'createFirstUssd()'}
+                  Create USSD Message
+              -else
+                %a.btn.btn-primary{ng-click:'createFirstAction()'}
+                  Create Message
+
 
 
           .option.hide
@@ -298,11 +323,11 @@
                 .category
                   All Responses
 
-        .node{ng-repeat:'action_set in flow.action_sets', drop-scope:'[[getAcceptedScopes("actionset")]]', node:'action_set', ng-dblclick:'$event.stopPropagation()',
+        .node{ng-repeat:'action_set in flow.action_sets', drop-scope:'actions rules', node:'action_set', ng-dblclick:'$event.stopPropagation()',
                ng-attr-id:'[[action_set.uuid]]', class:'action-node', ng-class:'{recents:action_set._showMessages, translate:lastActionMissingTranslation(action_set)}',
                ng-style:"{left:action_set.x, top:action_set.y}"}
 
-          .active{ng-show:'action_set._active > 0', ng-click:'broadcastToStep(action_set.uuid)'}
+          .active{ng-show:'action_set._active > 0', ng-click:'broadcastToStep($event, action_set.uuid,  action_set._active)'}
             [[action_set._active|number]]
 
           .flow-start{ng-show:'action_set.uuid == flow.entry'}
@@ -315,7 +340,7 @@
                     class:'[[action.type]]', ng-class:'{ disabled:!action._translation, missing: action._missingTranslation }'}
               .drop-overlay.hide
                 %p
-                  Drop to upload new sound file
+                  Drop to upload new file
 
               .title.action-name{ ng-model: 'action' }
 
@@ -350,17 +375,28 @@
               .summary
 
                 %span.language{ng-show:'action.type == "lang"'}
-
                   [[action.name]]
 
 
                 // messages with translations
-                %span.translation{ng-show:'action.type == "send" || action.type == "reply" || action.type == "say"'}
+                %span.translation{ng-show:'action.type == "send" || action.type == "reply" || action.type == "say" || action.type == "end_ussd"'}
 
-                  [[action._translation]]
+                  .text{ng-class:'{}'}
+
+                    [[action._translation]]
 
                   .missing{ng-hide:'action._translation'}
                     -trans "Click here to add a message"
+
+                  %span.reply{ng-show:'action.type == "reply" || action.type == "send"'}
+
+                    .node-attachment.viewer-button{ng-class:'{"icon-videocam": action._media.type == "video", "icon-photo": action._media.type=="image", "icon-arrow-right-8": action._media.type=="audio"}', ng-show:'action._media', ng-click:'clickShowActionMedia(action); $event.stopPropagation();'}
+                    .node-attachment.icon-attachment{ng-show:'action._attachURL'}
+                    .node-attachment.viewer-button.icon-quick-reply{ng-show:'action.quick_replies.length > 0'}
+
+                    .uploading{ng-show:'action.uploading'}
+                      %img.throbber{ src: "{{ STATIC_URL }}images/loader-bars.gif" }
+                      .cancel.icon-cancel-circle{ng-click:"upload.abort(); action.uploading=false; action.dirty=true; $event.stopPropagation();"}
 
                   %span.recording{ng-show:'action.type=="say"'}
 
@@ -373,7 +409,7 @@
                       %img.throbber{ src: "{{ STATIC_URL }}images/loader-bars.gif" }
                       .cancel.icon-cancel-circle{ng-click:"upload.abort(); action.uploading=false; action.dirty=true; $event.stopPropagation();"}
 
-                // updating contacts
+                // playing a recording
                 %span{ng-show:'action.type == "play"'}
                   Play recording
                   %span.attn
@@ -393,6 +429,10 @@
                   .group-name.force-wrap{ng-hide:'group.name'}
                     [[group]]
 
+                // removing from all groups
+                %span{ng-show:'action.type == "del_group" && action.groups.length == 0'}
+                  -trans "Remove from all groups"
+
                 // updating contacts
                 %span{ng-show:'action.type == "save"'}
                   Update value for
@@ -406,16 +446,24 @@
 
                 // starting flows
                 %span{ng-show:'action.type == "flow" || action.type == "trigger-flow"'}
-                  .start-flow
-                    [[action.name]]
+                  .start-flow{ng-click:'$event.stopPropagation();'}
+                    .action-link{ng-click:'$event.stopPropagation();'}
+                      %a{href:'../[[action.flow.uuid]]'}
+                        [[action.flow.name]]
 
                 // webhooks
                 %span{ng-show:'action.type == "api"'}
                   .webhook
                     [[action.webhook]]
 
-          .add.icon-plus-circle2{ng-click:'addAction(action_set);'}
-          .source{ng-attr-id:'[[action_set.uuid]]_source', drop-scope:'rules', ng-class:'{connected:action_set.destination}', ng-click:'clickActionSource(action_set); $event.stopPropagation()'}
+                // setting channel
+                %span{ng-show:'action.type == "channel"'}
+                  .channel
+                    [[action.name]]
+
+
+          .add.icon-plus-circle2{ng-show:'!hasEndUssd(action_set)', ng-click:'addAction(action_set);'}
+          .source{ng-show:'!hasEndUssd(action_set)', ng-attr-id:'[[action_set.uuid]]_source', drop-scope:'rules', ng-class:'{connected:action_set.destination}', ng-click:'clickActionSource(action_set); $event.stopPropagation()'}
             .recent-messages{ng-show:'action_set._showMessages'}
               .title
                 -trans "Recent Messages"
@@ -432,59 +480,114 @@
 
 
         .node{ng-repeat:'ruleset in flow.rule_sets track by ruleset.uuid',
-              node:'ruleset', drop-scope:'[[getAcceptedScopes("ruleset")]]', ng-dblclick:'$event.stopPropagation()',
+              node:'ruleset', drop-scope:'actions rules', ng-dblclick:'$event.stopPropagation()',
               class:'rule-node', ng-attr-id:'[[ruleset.uuid]]',
               ng-class:"{recents:ruleset._showMessages}",
-              ng-style:"{left:ruleset.x, top:ruleset.y}"}
+              ng-style:"{left:ruleset.x, top:ruleset.y}",
+              ng-click:'clickRuleset(ruleset)'}
 
-          .active{ng-show:'ruleset._active > 0', ng-click:'broadcastToStep(ruleset.uuid)'}
+          .active{ng-show:'ruleset._active > 0', ng-click:'broadcastToStep($event, ruleset.uuid, ruleset._active)'}
             [[ruleset._active|number]]
 
           .flow-start{ng-show:'ruleset.uuid == flow.entry'}
             -trans "Flow Start"
 
 
-          .rule-header{ng-click:'clickRuleset(ruleset)'}
+          .rule-header
             .title.wait-message{ng-show:'ruleset.ruleset_type=="wait_message"'}
               -trans "Wait for "
               [[ruleset.label]]
 
+            .title.wait-ussd{ng-show:'ruleset.ruleset_type=="wait_menu"'}
+              -trans "Wait for USSD Menu"
+
+            .title.wait-ussd{ng-show:'ruleset.ruleset_type=="wait_ussd"'}
+              -trans "Wait for USSD Response"
+
+            .title.wait-photo{ng-show:'ruleset.ruleset_type=="wait_photo"'}
+              -trans "Wait for "
+              [[ruleset.label]]
+
+            .title.wait-video{ng-show:'ruleset.ruleset_type=="wait_video"'}
+              -trans "Wait for "
+              [[ruleset.label]]
+
+            .title.wait-audio{ng-show:'ruleset.ruleset_type=="wait_audio"'}
+              -trans "Wait for "
+              [[ruleset.label]]
+
+            .title.wait-gps{ng-show:'ruleset.ruleset_type=="wait_gps"'}
+              -trans "Wait for "
+              [[ruleset.label]]
+
             .title.webhook-header{ng-show:'ruleset.ruleset_type=="wait_recording"'}
-                -trans "Wait for Recording"
+              -trans "Wait for "
+              [[ruleset.label]]
 
             .title.webhook-header{ng-show:'ruleset.ruleset_type=="wait_digit"'}
-                -trans "Wait for Menu"
+              -trans "Wait for Menu"
 
             .title.webhook-header{ng-show:'ruleset.ruleset_type=="wait_digits"'}
-                -trans "Wait for Digits"
+              -trans "Wait for Digits"
+
+            .title.passive.random{ng-show:'ruleset.ruleset_type=="random"'}
+              -trans "Random Split"
+              [[ruleset.label]]
 
             .title.passive.contact-field{ng-class:"{missing:getContactFieldName(ruleset).missing}", ng-show:'ruleset.ruleset_type=="contact_field"'}
-                -trans "Split on "
-                [[getContactFieldName(ruleset).text]]
+              -trans "Split on "
+              [[getContactFieldName(ruleset).text]]
 
             .title.passive.flow-field{ng-class:"{missing:getFlowFieldName(ruleset).missing}", ng-show:'ruleset.ruleset_type=="flow_field"'}
-                -trans "Split on "
-                [[getFlowFieldName(ruleset).text]]
+              -trans "Split on "
+              [[getFlowFieldName(ruleset).text]]
 
             .title.passive.form-field{ng-class:"{missing:getFlowFieldName(ruleset).missing}", ng-show:'ruleset.ruleset_type=="form_field"'}
-                -trans "Split on field in "
-                [[getFlowFieldName(ruleset).text]]
+              -trans "Split on field in "
+              [[getFlowFieldName(ruleset).text]]
 
             .title.passive.webhook-header{ng-show:'ruleset.ruleset_type=="webhook"'}
-                -trans "Call Webhook"
+              -trans "Call Webhook"
+
+            .title.passive.resthook-header{ng-show:'ruleset.ruleset_type=="resthook"'}
+              -trans "Call Zapier"
 
             .title.passive.expression{ng-show:'ruleset.ruleset_type=="expression"'}
-                -trans "Split by Expression"
+              -trans "Split by Expression"
+
+            .title.passive.transfer-airtime-header{ng-show:'ruleset.ruleset_type=="airtime"'}
+              -trans "Transfer Airtime"
+
+            .title.passive.group-header{ng-show:'ruleset.ruleset_type=="group"'}
+              -trans "Split on Group"
+
+            .title.passive.subflow-header{ng-show:'ruleset.ruleset_type=="subflow"'}
+              -trans "Run Flow"
 
             .remove-warning
               Remove Rules?
 
             .remove.icon-close{ ng-click: 'confirmRemoveRuleset($event, ruleset); $event.stopPropagation()' }
 
-          %table{style:'width:100%;', ruleset:"ruleset", ng-click:'clickRuleset(ruleset)'}
+          .ussd-flow-items-wrapper{ng-show:'ruleset.ruleset_type=="wait_menu" || ruleset.ruleset_type=="wait_ussd"', ng-class:'{ missing: ruleset.config._missingTranslation }', ng-click:"clickRuleset(ruleset); $event.stopPropagation();"}
+            .ussd-flow-text{ng-class:'{ missing: ruleset.config._missingTranslation }'}
+              [[ruleset.config._ussd_translation]]
+            .ussd-flow-items
+              .ussd-flow-item{ng-repeat:'rule in ruleset.rules', ng-if:'ruleset.ruleset_type=="wait_menu"', ng-class:'{ missing: rule._missingTranslation }'}
+                %span.ussd-label{ng-show:'rule.test.type != "true" && rule.test.type != "interrupted_status"'}
+                  [[rule.test.test]]: [[rule._translation]]
+
+          .div
+            .ruleset-body{ng-show:'ruleset.ruleset_type=="subflow"'}
+              -trans "Run flow "
+              %span.flow-link{ng-click:'$event.stopPropagation();'}
+                %a{href:'../[[ruleset.config.flow.uuid]]'}
+                  [[ruleset.config.flow.name]]
+
+          %table{style:'width:100%;', ruleset:"ruleset"}
             %tr.rules
               %td.rule{valign:'bottom', ng-repeat:'category in ruleset._categories', ng-attr-id:'[[category.source]]',
-                       ng-class:'{ missing: category._missingTranslation }'}
+                       ng-class:'{ missing: category._missingTranslation, interrupted: category.type == "interrupted_status" }'}
                 .category
                   [[category._translation]]
                 .source{ng-attr-id:'[[ruleset.uuid]]_[[category.source]]_source', drop-scope:'actions', ng-class:'{connected:category.target}', ng-click:'clickRuleSource(category); $event.stopPropagation();'}
@@ -502,9 +605,6 @@
                   .count{ng-mouseover:'showRecentMessages()', ng-mouseleave:'hideRecentMessages();'}
                     [[category._visited|number]]
 
-
-
-
         .note{ng-dblclick:'$event.stopPropagation();', ng-repeat:'note in flow.metadata.notes', note:'note'}
           %a.close{ng-click:'removeNote(note);'}
             .glyph.icon-close
@@ -513,5 +613,8 @@
 
 -block extra-style
   -compress css
-    %link{type:'text/less', rel:'stylesheet', href:'{{STATIC_URL}}less/flow_editor.less', media:'all'}
-    %link{type:'text/less', rel:'stylesheet', href:'{{STATIC_URL}}less/simulator.less', media:'all'}
+    {% lessblock %}
+      :plain
+        @import "flow_editor.less";
+        @import "simulator.less";
+    {% endlessblock %}

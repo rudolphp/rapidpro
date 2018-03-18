@@ -1,38 +1,41 @@
-from __future__ import unicode_literals
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import json
-import urlparse
+from six.moves.urllib.parse import parse_qs, urlencode
 
-from datetime import timedelta
-from django.contrib.auth.models import User
-from django.utils import timezone
+from django.conf import settings
+from django.core.urlresolvers import reverse
+from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.translation import ugettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
-from django.views.generic.base import RedirectView
-from django.core.cache import cache
+from django.views.generic import RedirectView, View
 from random import randint
-from smartmin.views import *
-from temba.campaigns.models import EventFire
-from temba.orgs.bundles import BUNDLES
-from temba.public.models import *
-from temba.channels.models import SyncEvent
-from temba.msgs.models import Msg
-from temba.utils import analytics, random_string
-from temba.flows.models import FlowRun
-from urllib import urlencode
-from django.db.models import Count
+from smartmin.views import SmartCRUDL, SmartReadView, SmartFormView, SmartCreateView, SmartListView, SmartTemplateView
+from temba.public.models import Lead, Video
+from temba.utils import analytics, get_anonymous_user
+from temba.utils.text import random_string
+
 
 class IndexView(SmartTemplateView):
     template_name = 'public/public_index.haml'
 
+    def pre_process(self, request, *args, **kwargs):
+        response = super(IndexView, self).pre_process(request, *args, **kwargs)
+        redirect = self.request.branding.get('redirect')
+        if redirect:
+            return HttpResponseRedirect(redirect)
+        return response
+
     def get_context_data(self, **kwargs):
         context = super(IndexView, self).get_context_data(**kwargs)
-        context['thanks'] = 'thanks' in self.request.REQUEST
-        context['errors'] = 'errors' in self.request.REQUEST
+        context['thanks'] = 'thanks' in self.request.GET
+        context['errors'] = 'errors' in self.request.GET
         if context['errors']:
-            context['error_msg'] = urlparse.parse_qs(context['url_params'][1:])['errors'][0]
+            context['error_msg'] = parse_qs(context['url_params'][1:])['errors'][0]
 
         return context
+
 
 class WelcomeRedirect(RedirectView):
     url = "/welcome"
@@ -64,6 +67,7 @@ class Welcome(SmartTemplateView):
 
     def has_permission(self, request, *args, **kwargs):
         return request.user.is_authenticated()
+
 
 class Privacy(SmartTemplateView):
     template_name = 'public/public_privacy.haml'
@@ -100,6 +104,7 @@ class VideoCRUDL(SmartCRUDL):
             context['videos'] = Video.objects.exclude(pk=self.get_object().pk).order_by('order')
             return context
 
+
 class LeadCRUDL(SmartCRUDL):
     actions = ('create',)
     model = Lead
@@ -115,19 +120,19 @@ class LeadCRUDL(SmartCRUDL):
             return super(LeadCRUDL.Create, self).dispatch(request, *args, **kwargs)
 
         def get_success_url(self):
-            return reverse('orgs.org_signup') + "?%s" % urlencode({'email':self.form.cleaned_data['email']})
+            return reverse('orgs.org_signup') + "?%s" % urlencode({'email': self.form.cleaned_data['email']})
 
         def form_invalid(self, form):
             url = reverse('public.public_index')
             email = ', '.join(form.errors['email'])
 
-            if 'from_url' in form.data:
+            if 'from_url' in form.data:  # pragma: needs cover
                 url = reverse(form.data['from_url'])
 
             return HttpResponseRedirect(url + "?errors=%s" % email)
 
         def pre_save(self, obj):
-            anon = User.objects.get(id=-1)
+            anon = get_anonymous_user()
             obj = super(LeadCRUDL.Create, self).pre_save(obj)
             obj.created_by = anon
             obj.modified_by = anon
@@ -141,7 +146,9 @@ class LeadCRUDL(SmartCRUDL):
 
 
 class Blog(RedirectView):
+    # whitelabels don't have blogs, so we don't use the brand domain here
     url = "http://blog." + settings.HOSTNAME
+
 
 class GenerateCoupon(View):
 
@@ -156,7 +163,7 @@ class GenerateCoupon(View):
 class OrderStatus(View):
 
     def post(self, request, *args, **kwargs):
-        text = request.REQUEST.get('text', '')
+        text = request.GET.get('text', '')
 
         if text.lower() == 'cu001':
             response = dict(status="Shipped",

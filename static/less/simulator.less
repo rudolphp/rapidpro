@@ -1,5 +1,3 @@
-@import "variables";
-
 .restart-participants .control-label {
   margin-bottom: 0px;
 }
@@ -28,6 +26,12 @@
   top: 130px;
   right: 30px;
 
+  &.disabled {
+    .simulator-footer {
+      visibility: hidden;
+    }
+  }
+
   &:hover {
   }
 
@@ -42,6 +46,11 @@
     margin-top:-540px;
   }
 
+}
+
+.link {
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .simulator-spacer {
@@ -131,6 +140,7 @@
   textarea {
     line-height: 20px;
   }
+
 }
 
 #footer {
@@ -141,18 +151,51 @@
 .simulator-body {
   width: 240px;
   padding-top: 5px;
-  margin-left: 20px;
+  margin-left: 18px;
   margin-top: -20px;
   height: 355px;
   overflow-x: hidden;
   overflow-y: scroll;
+
+  &.v2 {
+    background-color: #fff6c0;
+  }
+
+  .imsg {
+    .media-file {
+      img, video, audio {
+        max-width: 100%;
+      }
+    }
+  }
+
+  .imsg.to.media-msg {
+
+    // background: #afafaf;
+    margin-left: 144px;
+
+    &:before {
+      // border-color: #afafaf;
+    }
+
+    .media-icon {
+      font-size:28px;
+      height:32px;
+      width: 100%;
+      line-height:28px;
+      text-align: center;
+    }
+
+  }
 }
+
 .simulator-body > .messages-wrapper {
   width: 262px;
   padding-top: 5px;
   border: 1px solid #ddd;
   border-top: 0 none;
 }
+
 .simulator-footer {
   width: 234px;
   height: 35px;
@@ -171,6 +214,7 @@
   padding: 5px 8px;
   line-height: 12px;
   text-align: center;
+  word-break: break-word;
 }
 
 .ilog.iwarn, .ilog.ierror {
@@ -210,4 +254,54 @@
   width: 180px;
   font-size: 14px;
   display: none;
+}
+
+.imsg.ussd{
+  .rounded-corners(0px);
+
+  &.to {
+    .rounded-corners(5px);
+    margin-left: 20px;
+    background-color: #757479;
+  }
+
+  &.from {
+    margin-right: 20px;
+    background-color: #E5E4E9;
+  }
+
+  &.to:before {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    right: -10px;
+    border-color: #000;
+    border-radius: 0;
+    clip: auto !important;
+    width: 0;
+    height: 0;
+    border-width: 0;
+    border-bottom: 20px solid #757479 !important;
+    border-right: 20px solid transparent !important;
+  }
+
+  &.from:before {
+    display: none;
+  }
+}
+
+.quick-reply{
+  outline: none;
+  margin: 0 2px 6px 2px;
+  border-radius: 85px;
+  font-size: 12px;
+  transition: background-color 0.5s ease;
+}
+
+.quick-reply:hover{
+  transition: background-color 0.5s ease;
+}
+
+.quick-reply:focus{
+  outline: none;
 }

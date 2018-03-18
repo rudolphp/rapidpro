@@ -1,15 +1,12 @@
--load smartmin i18n
+-load smartmin i18n temba
 
 %ul#top-menu
 
   -if org_perms.msgs.msg_inbox and not request.user.is_superuser
     %li.nav-messages
-      %a.icon-nav-messages{href:"{% url 'msgs.msg_inbox' %}", class:"{% active request 'inbox|outbox|broadcast|call|sms/filter|sms/flow|sms/archived|failed' %}"}
+      %a.icon-nav-messages{href:"{% url 'msgs.msg_inbox' %}", class:"{% active request 'inbox|outbox|broadcast|call|msg/filter|msg/flow|msg/archived|failed' %}"}
         .title
           -trans "messages"
-      -if msgs_unread_count
-        .notification
-          {{ msgs_unread_count }}
 
   -if org_perms.contacts.contact_list and not request.user.is_superuser
     %li.nav-contacts
@@ -19,18 +16,9 @@
 
   -if org_perms.flows.flow_list and not request.user.is_superuser
     %li.nav-flows
-      %a.icon-nav-flows{href:"{% url 'flows.flow_list' %}", class:"{% active request '(?<!sms)/flow' %}"}
+      %a.icon-nav-flows{href:"{% url 'flows.flow_list' %}", class:"{% active request '(?<!msg)/flow' %}"}
         .title
           -trans "flows"
-      -if flows_unread_count
-        .notification
-          {{ flows_unread_count }}
-
-  -if org_perms.flows.ruleset_analytics and not request.user.is_superuser
-    %li.nav-analytics
-      %a.icon-nav-analytics{href:"{% url 'flows.ruleset_analytics' %}", class:"{% active request 'analytics' %}"}
-        .title
-          -trans "analytics"
 
   -if org_perms.campaigns.campaign_list and not request.user.is_superuser
     %li.nav-campaigns
@@ -65,6 +53,12 @@
           .title
             -trans "orgs"
 
+  -if request.user.is_superuser or perms.orgs.org_dashboard
+    %li.nav-dashboard
+      %a.icon-nav-dashboard{href:"{% url 'dashboard.dashboard_home' %}", class:"{% active request 'dashboard(?!/flows)' %}"}
+        .title
+          -trans "dashboard"
+
   -if not request.user.is_anonymous
     %li.more
       %a.icon-menu-4{href:""}
@@ -80,7 +74,7 @@
     -block temba-login
 
       %li.nav-login
-        %a.icon-nav-login{href:"{% ssl_url 'users.user_check_login' %}"}
+        %a.icon-nav-login{href:"{% ssl_brand_url 'users.user_check_login' %}"}
           .title
             -trans "sign in"
 
